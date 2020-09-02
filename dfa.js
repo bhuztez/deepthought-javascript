@@ -125,7 +125,7 @@ var DatalogLexer = (
         function convert_tokens(tokens) {
             var result = [];
 
-            for each (let token in tokens) {
+            for (let token of tokens) {
                 var [mode, match, s] = token;
 
                 if ((mode === 0) && (match in [0,1,2])) {

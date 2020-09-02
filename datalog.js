@@ -1,6 +1,6 @@
 var Datalog = (
     function() {
-        function range(begin, end) {
+        function*range(begin, end) {
             for (var i=begin; i<end; i++) {
                 yield i;
             }
@@ -19,7 +19,14 @@ var Datalog = (
                 return [false, "syntax error in query"];
             }
 
-            return [true, [ [n, [(m||mod) ,f], a] for each ([n, m, f, a] in ast)] ];
+            return [
+                true,
+                ast.map(
+                    function(node) {
+                        let [n, m, f, a] = node;
+                        return [n, [(m||mod), f], a];
+                    }
+                )];
         }
 
 
@@ -45,9 +52,20 @@ var Datalog = (
 
             return [
                 true,
-                [[head, [[n, [(m||mod),f], a] for each ([n, m, f, a] in body)] ]
-                 for each ([head, body] in ast)]
-                                              ];
+                ast.map(
+                    function(node) {
+                        let [head, body] = node;
+                        return [
+                            head,
+                            body.map(
+                                function(node) {
+                                    let [n, m, f, a] = node;
+                                    return [n, [(m||mod), f], a];
+                                }
+                            )
+                        ];
+                    }
+                )];
         }
 
 
@@ -60,16 +78,16 @@ var Datalog = (
 
             var db = {};
 
-            for each (let [head, body] in clauses[1]) {
+            for (let [head, body] of clauses[1]) {
                 var [p, a] = head;
                 var entry = db[p] || [];
 
                 entry.push(
                     ["rule",
                      a,
-                     [ [x, y] for each ([pos, x, y] in body) if (pos === true)],
-                              [ [x, y] for each ([pos, x, y] in body) if (pos === false)]
-                              ]);
+                     body.filter(p => p[0] === true).map(p => [p[1], p[2]]),
+                     body.filter(p => p[0] === false).map(p => [p[1], p[2]])
+                    ]);
 
                 db[p] = entry;
             }
@@ -128,7 +146,7 @@ var Datalog = (
         }
 
         function is_goal_in_list(goal, list) {
-            for each (var g in list) {
+            for (let g of list) {
                 if (is_same_goal(g, goal)) {
                     return true;
                 }
@@ -180,7 +198,8 @@ var Datalog = (
             },
 
             walk: function(vs) {
-                return [this.subst(v) for each (v in vs)];
+                let self = this;
+                return vs.map(v => self.subst(v));
             },
 
             unify: function(v1, v2) {
@@ -207,19 +226,19 @@ var Datalog = (
             },
 
 
-            keys: function() {
+            keys: function*() {
                 for(var s=this; s!==nil; s=s.__proto__) {
                     yield s.key;
                 }
             },
 
-            values: function() {
+            values: function*() {
                 for(var s=this; s!==nil; s=s.__proto__) {
                     yield s.value;
                 }
             },
 
-            items: function() {
+            items: function*() {
                 for(var s=this; s!==nil; s=s.__proto__) {
                     yield [s.key, s.value];
                 }
@@ -291,7 +310,7 @@ var Datalog = (
         }
 
         Table.prototype.find = function(key) {
-            for each (var entry in this.data) {
+            for (let entry of this.data) {
                 var [k,v] = entry;
 
                 if (!is_same_goal(k, key)) {
@@ -330,13 +349,13 @@ var Datalog = (
 
 
         function subst_of(answer) {
-            return nil.exts([ [["var", i], answer[i]] for each (i in range(0, answer.length))]);
+            return nil.exts(Array.from(range(0, answer.length)).map(i => [["var", i], answer[i]]));
         }
 
 
         function query(goals, db) {
-            var posgoals = [[x,y] for each ([pos,x,y] in goals) if (pos === true)];
-            var neggoals = [[x,y] for each ([pos,x,y] in goals) if (pos === false)];
+            var posgoals = goals.filter(p => p[0] === true).map(p => [p[1], p[2]]);
+            var neggoals = goals.filter(p => p[0] === false).map(p => [p[1], p[2]]);
 
             var s = nil;
             var c = 0;
@@ -345,14 +364,14 @@ var Datalog = (
                 [res, s, c] = reify(posgoals[i][1], s, c);
             }
 
-            var r = nil.exts([[v,k] for each([k, v] in s.items())]);
-            var a = [["var", i] for each (i in range(0, c))];
+            var r = nil.exts(Array.from(s.items()).map(item => [item[1], item[0]]));
+            var a = Array.from(range(0, c)).map(i => ["var", i]);
 
             var table = new Table();
             table.put(["root", a], [[], [], [], false]);
 
             cont(
-                [ [ [ ["rule", [ r.subst(x) for each (x in a)], posgoals, neggoals ] ], "root", a] ],
+                [ [ [ ["rule", a.map(x => r.subst(x)), posgoals, neggoals ] ], "root", a] ],
                 table,
                 db);
 
@@ -360,11 +379,13 @@ var Datalog = (
 
             var res = [];
 
-            for each (var answer in answers) {
+            for (let answer of answers) {
                 res.push(
                     nil.exts(
-                        [[k, subst_of(answer).subst(v)]
-                         for each ([k,v] in s.items())])
+                        Array.from(s.items()).map(
+                            item => [item[0], subst_of(answer).subst(item[1])]
+                        )
+                    )
                 );
             }
 
@@ -382,28 +403,27 @@ var Datalog = (
                 var reifiedgoals = [];
                 var goals = [];
 
-                for each (var [p,a] in neggoals) {
+                for (let [p,a] of neggoals) {
                     var a1 = s.walk(a);
                     var [a2, _, _] = reify(a1);
                     reifiedgoals.push([p, a2]);
                     goals.push([[p,a2], [p,a]]);
                 }
 
-                for each (var g in reifiedgoals) {
+                for (let g of reifiedgoals) {
                     neglookup(g, [parent, s, goals], waitings, stack, table, db);
                 }
             } else {
                 var [goal, subst] = parent;
 
-                var items = [[k, s.subst(v)] for each ([k,v] in subst.items())];
+                var items = Array.from(subst.items()).map(item => [item[0], s.subst(item[1])]);
                 var s1 = nil.exts(items);
-                var answer = [ s1.subst(["var", i]) for each (i in range(0, items.length))];
-
+                var answer = Array.from(range(0, items.length)).map(i => s1.subst(["var", i]));
                 var [answers, poslookups, neglookups, completed] = table.get(goal);
 
                 var existed = false;
 
-                for each(var a in answers) {
+                for (let a of answers) {
                     var match = true;
 
                     for(var i=0; i<answer.length; i++) {
@@ -422,7 +442,7 @@ var Datalog = (
                 if(existed === false) {
                     answers.push(answer);
 
-                    for each (var frame in poslookups) {
+                    for (let frame of poslookups) {
                         waitings.push([answer, frame]);
                     }
                 }
@@ -440,7 +460,7 @@ var Datalog = (
                     poslookups.push(frame);
                 }
 
-                for each (var answer in answers) {
+                for (let answer of answers) {
                     waitings.push([answer, frame]);
                 }
 
@@ -473,14 +493,14 @@ var Datalog = (
 
 
         function trace(found, table) {
-            var delta = [g for each (g in found)];
+            var delta = found.map(g => g);
 
             while(delta.length > 0) {
                 var nextdelta = [];
 
-                for each (var goal in delta) {
+                for (let goal of delta) {
                     var [_,poss,_,_] = table.get(goal);
-                    for each (var [[g,_], _, _, _, _] in poss) {
+                    for (var [[g,_], _, _, _, _] of poss) {
                         if (!is_goal_in_list(g, found)) {
                             found.push(g);
                             nextdelta.push(g);
@@ -497,7 +517,7 @@ var Datalog = (
         function remove_neglookup(goal, frame, table) {
             var entry = table.get(goal);
             var negs = entry[2];
-            entry[2] = [neg for each (neg in negs) if (neg !== frame)];
+            entry[2] = negs.filter(neg => neg !== frame);
         }
 
 
@@ -510,10 +530,10 @@ var Datalog = (
 
             var empty = (answers.length === 0);
 
-            for each (var frame in negs) {
+            for (var frame of negs) {
                 var [parent, s, goals] = frame;
 
-                for each (var [reifiedgoal, _] in goals) {
+                for (var [reifiedgoal, _] of goals) {
                     if (is_same_goal(goal, reifiedgoal)) {
                         continue;
                     }
@@ -521,7 +541,8 @@ var Datalog = (
                     remove_neglookup(reifiedgoal, frame, table);
                 }
 
-                var neggoals = [g for each ([r,g] in goals) if (!is_same_goal(goal, r))];
+
+                var neggoals = goals.filter(rg => !is_same_goal(goal, rg[0])).map(rg => rg[1]);
 
                 if (empty) {
                     success(parent, s, [], neggoals, waitings, stack, table, db);
@@ -555,14 +576,14 @@ var Datalog = (
                 var active = [];
                 var negtargets = [];
 
-                for each (var [goal, [_,_,negs,completed]] in table.data) {
+                for (var [goal, [_,_,negs,completed]] of table.data) {
                     if(completed === true) {
                         continue;
                     }
 
                     active.push(goal);
 
-                    for each (var [[g,_], _, _] in negs) {
+                    for (var [[g,_], _, _] of negs) {
                         if (!is_goal_in_list(g, negtargets)) {
                             negtargets.push(g);
                         }
@@ -570,9 +591,9 @@ var Datalog = (
                 }
 
                 var negreachable = trace(negtargets, table);
-                var completed = [g for each (g in active) if (!is_goal_in_list(g, negreachable))];
+                var completed = active.filter(g => !is_goal_in_list(g, negreachable));
 
-                for each (var goal in completed) {
+                for (var goal of completed) {
                     complete(goal, waitings, stack, table, db);
                 }
 
@@ -595,8 +616,7 @@ var Datalog = (
                 var [parent, s, r, posgoals, neggoals] = frame;
 
                 var s1 = subst_of(answer);
-                var r1 = s.exts([ [k, s1.subst(v)] for each ([k,v] in r.items()) ]);
-
+                var r1 = s.exts(Array.from(r.items()).map(item => [item[0], s1.subst(item[1])]));
                 success(parent, r1, posgoals, neggoals, waitings, stack, table, db);
             }
         }
@@ -610,8 +630,8 @@ var Datalog = (
                 return undefined;
             }
 
-            var s1 = nil.exts([[k,v] for each ([k,v] in s.items()) if (reified(k))]);
-            var s2 = nil.exts([[k,v] for each ([k,v] in s.items()) if (!reified(k))]);
+            var s1 = nil.exts(Array.from(s.items()).filter(item => reified(item[0])));
+            var s2 = nil.exts(Array.from(s.items()).filter(item => !reified(item[0])));
 
             return success([[p, a], s1], s2, posgoals, neggoals, waitings, stack, table, db);
         }

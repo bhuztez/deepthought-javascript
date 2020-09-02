@@ -194,7 +194,7 @@ var DatalogParser = (
                     stack.push(
                         [next_state,
                          [rule_num,
-                          [s for each ([_,s] in found)]]]);
+                          found.map(f => f[1])]]);
                 }
             }
         }
